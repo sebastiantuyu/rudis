@@ -4,6 +4,9 @@ use std::io::Write;
 use std::io::Read;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::env::args_os;
+
+static mut MEMORY_STORE_INSTANCE: Option<MemoryStore> = None;
 
 struct MemoryStore {
     memory: HashMap<String, String>,
@@ -46,7 +49,6 @@ impl MemoryStore {
     }
 }
 
-static mut MEMORY_STORE_INSTANCE: Option<MemoryStore> = None;
 
 fn get_memory_instance() -> &'static mut MemoryStore {
     unsafe {
@@ -71,13 +73,49 @@ fn ttl_thread() {
     }
 }
 
+fn read_options() -> Option<String> {
+    // let args: Vec<&str> = env::args().map(|v| v.as_ref()).collect::<Vec<_>>();
+    let args: Vec<String> = args_os()
+        .map(|arg| arg.into_string().unwrap_or_else(|os_string| {
+            os_string.to_string_lossy().to_string()
+        }))
+        .collect();
+    let sz = args.len();
+
+    for argument in &args {
+        let arg = argument.as_str();
+        if arg.starts_with("--") {
+            let option: Vec<String> = arg.split("--").map(|v| v.to_string()).collect();
+            match option[1].as_str() {
+                "port" => {
+                    if sz <= 2 {
+                        panic!("Missing arguments for [port]");
+                    }
+                    return Some(args[2].to_string());
+                }
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
 fn main() {
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
+    // process program options
+    let port = read_options().unwrap_or(
+        "6379".to_string()
+    );
+
+    let listener = TcpListener::bind(
+        format!("127.0.0.1:{}", port)
+    ).unwrap();
+
+
     thread::spawn(|| {
         ttl_thread();
     });
 
-    println!("[Rudis]: Server started on port 6379");
+    println!("[Rudis]: Server started on port {}", port);
 
     for listener_stream in listener.incoming() {
         match listener_stream {
