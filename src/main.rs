@@ -7,6 +7,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::env::args_os;
 
 static mut MEMORY_STORE_INSTANCE: Option<MemoryStore> = None;
+static mut OPTIONS: Option<Options> = None;
 
 struct MemoryStore {
     memory: HashMap<String, String>,
@@ -50,6 +51,24 @@ impl MemoryStore {
 }
 
 
+struct Options  {
+    options: HashMap<String, String>
+}
+
+impl Options {
+    fn new() -> Self {
+        Options {
+            options: HashMap::new(),
+        }
+    }
+}
+
+fn get_options_instance() ->  &'static mut Options {
+    unsafe {
+        OPTIONS.get_or_insert_with(|| Options::new())
+    }
+}
+
 fn get_memory_instance() -> &'static mut MemoryStore {
     unsafe {
         MEMORY_STORE_INSTANCE.get_or_insert_with(|| MemoryStore::new())
@@ -73,8 +92,14 @@ fn ttl_thread() {
     }
 }
 
-fn read_options() -> Option<String> {
-    // let args: Vec<&str> = env::args().map(|v| v.as_ref()).collect::<Vec<_>>();
+fn load_basic_options() {
+    let options = get_options_instance();
+    options.options.insert("role".to_string(), "master".to_string());
+    options.options.insert("port".to_string(), "6379".to_string());
+}
+
+fn read_options() {
+    load_basic_options();
     let args: Vec<String> = args_os()
         .map(|arg| arg.into_string().unwrap_or_else(|os_string| {
             os_string.to_string_lossy().to_string()
@@ -91,20 +116,19 @@ fn read_options() -> Option<String> {
                     if sz <= 2 {
                         panic!("Missing arguments for [port]");
                     }
-                    return Some(args[2].to_string());
+                    get_options_instance()
+                        .options
+                        .insert("port".to_string(), args[2].to_string());
                 }
                 _ => {}
             }
         }
     }
-    None
 }
 
 fn main() {
-    // process program options
-    let port = read_options().unwrap_or(
-        "6379".to_string()
-    );
+    read_options();
+    let port = get_options_instance().options.get("port").unwrap();
 
     let listener = TcpListener::bind(
         format!("127.0.0.1:{}", port)
@@ -174,6 +198,10 @@ fn process_commands(commands: Vec<String>) -> Vec<u8> {
                 }
                 raw_response = "OK";
             },
+            "INFO" => {
+                let options = &get_options_instance().options;
+                return format!("$11\r\nrole:{}\r\n", options.get("role").unwrap()).as_bytes().to_vec();
+            }
             _ => {},
         }
     } else {}
