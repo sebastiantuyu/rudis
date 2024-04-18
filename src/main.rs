@@ -142,36 +142,31 @@ fn process_commands(commands: Vec<String>) -> Vec<u8> {
     return response_parser(raw_response.to_string());
 }
 
-fn get_header(cursor: usize, buff: [u8; 255]) -> usize {
-    let mut n_cursor = 0;
-    for h in cursor..buff.len() {
+fn get_header(cursor: &usize, buff: [u8; 255]) -> (usize, u8) {
+    let mut delta = 0;
+    for h in *cursor..buff.len() {
         if buff[h] == 13 && buff[h + 1] == 10 {
-            n_cursor = ((h + 1) + 1) - cursor;
+            delta = ((h + 1) + 1) - cursor;
             break;
         }
     }
-    n_cursor
+    let header_buffer = &buff[(cursor + 1)..(cursor + delta - 2)];
+    return (delta, parse_u8(header_buffer))
 }
 
 fn parser(buff: [u8; 255]) -> Vec<String> {
     let mut cursor = 0;
     let mut commands: Vec<String> = Vec::new();
 
-    let mut cursor_delta = get_header(cursor, buff);
-    let header_buffer = &buff[(cursor + 1)..(cursor + cursor_delta - 2)];
+    let (cursor_delta, header_size) = get_header(&cursor, buff);
     cursor += cursor_delta;
 
-    let header_size = parse_u8(&header_buffer);
-
     for _i in 0..header_size {
-        cursor_delta = get_header(cursor, buff);
-        let data_buffer_header = &buff[(cursor + 1)..(cursor + cursor_delta - 2)];
+        let (cursor_delta, data_buffer_size) = get_header(&cursor, buff);
         cursor += cursor_delta;
 
-        let data_buffer_size: u8 = parse_u8(&data_buffer_header);
         let data_buffer = &buff[cursor..(cursor + data_buffer_size as usize)];
-        cursor += data_buffer_size as usize;
-        cursor += 2;
+        cursor += data_buffer_size as usize + 2;
 
         let _c = std::str::from_utf8(&data_buffer).unwrap();
         commands.push(_c.to_string());
