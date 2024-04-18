@@ -96,6 +96,8 @@ fn load_basic_options() {
     let options = get_options_instance();
     options.options.insert("role".to_string(), "master".to_string());
     options.options.insert("port".to_string(), "6379".to_string());
+    options.options.insert("master_repl_offset".to_string(), "0".to_string());
+    options.options.insert("master_replid".to_string(), "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string());
 }
 
 fn read_options() {
@@ -239,7 +241,13 @@ fn process_commands(commands: Vec<String>) -> Vec<u8> {
             },
             "INFO" => {
                 let options = &get_options_instance().options;
-                let response = format!("role:{}", options.get("role").unwrap());
+                let master_replid = options.get("master_replid").unwrap();
+                let port = options.get("role").unwrap();
+                let master_repl_offset = options.get("master_repl_offset").unwrap();
+
+                let response = format!(
+                    "role:{port}\n\rmaster_replid:{master_replid}\n\rmaster_repl_offset:{master_repl_offset}\n\r"
+                );
                 return format!("${}\r\n{response}\r\n", response.len()).as_bytes().to_vec();
             }
             _ => {},
