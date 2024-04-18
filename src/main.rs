@@ -3,15 +3,18 @@ use std::net::{TcpListener, TcpStream};
 use std::io::Write;
 use std::io::Read;
 use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 struct MemoryStore {
     memory: HashMap<String, String>,
+    expire: HashMap<String, u128>
 }
 
 impl MemoryStore {
     fn new() -> Self {
         MemoryStore {
-            memory: HashMap::new()
+            memory: HashMap::new(),
+            expire: HashMap::new(),
         }
     }
 
@@ -21,6 +24,25 @@ impl MemoryStore {
 
     fn get(&mut self, key: &str) -> Option<&String> {
         self.memory.get(key)
+    }
+
+    fn expire(&mut self, key: String, ttl: u128) {
+        self.expire.insert(key, ttl);
+    }
+
+    fn remove_expired(&mut self, current_time: u128) {
+        let mut keys_deleted: Vec<String> = Vec::new();
+        if self.expire.keys().len() > 0 {
+            for (k,ttl) in &self.expire {
+                if current_time > *ttl {
+                    self.memory.remove(k);
+                    keys_deleted.push(k.to_string());
+                }
+            }
+        }
+        for key in keys_deleted {
+            self.expire.remove(&key);
+        }
     }
 }
 
@@ -32,9 +54,31 @@ fn get_memory_instance() -> &'static mut MemoryStore {
     }
 }
 
+fn get_current_time() -> u128 {
+    let since_epoch = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    since_epoch.as_secs() as u128 * 1000 + since_epoch.subsec_millis() as u128
+}
+
+fn ttl_thread() {
+    let mut last_run = Instant::now();
+    loop {
+        let elapsed = last_run.elapsed();
+        if elapsed < Duration::from_millis(10) {
+            thread::sleep(Duration::from_millis(10) - elapsed);
+        }
+        get_memory_instance().remove_expired(get_current_time());
+        last_run = Instant::now();
+    }
+}
+
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
+    thread::spawn(|| {
+        ttl_thread();
+    });
+
     println!("[Rudis]: Server started on port 6379");
+
     for listener_stream in listener.incoming() {
         match listener_stream {
             Ok(stream) => {
@@ -78,13 +122,14 @@ fn process_commands(commands: Vec<String>) -> Vec<u8> {
                 }
             }
             "SET" => {
-                get_memory_instance().set(commands[1].to_string(), commands[2].to_string());
+                let memory = get_memory_instance();
+                memory.set(commands[1].to_string(), commands[2].to_string());
+                memory.expire(commands[1].to_string(), get_current_time() + 10000);
                 raw_response = "OK";
             },
             _ => {},
         }
     } else {}
-    println!("{}", raw_response);
     return response_parser(raw_response.to_string());
 }
 
