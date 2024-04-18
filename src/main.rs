@@ -27,42 +27,51 @@ fn parse_u8(st: &u8) -> u8 {
     return parsed.parse::<u8>().expect("failed in conversion");
 }
 
-fn process_commands(commands: Vec<String>) -> &'static [u8] {
+fn process_commands(commands: Vec<String>) -> Vec<u8> {
     if let Some(first_element) = commands.first() {
         match first_element.as_str() {
-            "PING" => b"+PONG\r\n",
-            _ => b"+\r\n",
+            "PING" => "+PONG\r\n".as_bytes().to_vec(),
+            "ECHO" => {
+                let res = format!("+{}\r\n", commands[1]).clone();
+                res.clone().as_bytes().to_vec()
+            },
+            _ => b"+\r\n".to_vec(),
         }
     } else {
-        b""
+        "".as_bytes().to_vec()
     }
+}
+
+fn parser(buff: [u8; 512]) -> Vec<String> {
+    let mut cursor = 0;
+    let mut commands: Vec<String> = Vec::new();
+    let header_buffer = &buff[cursor..(cursor + 4)];
+    cursor += 4;
+    let header_size = parse_u8(&header_buffer[1]);
+
+    for _i in 0..header_size {
+        let data_buffer_header = &buff[cursor..(cursor +4)];
+        cursor += 4;
+
+        let data_buffer_size: u8 = parse_u8(&data_buffer_header[1]);
+        let data_buffer = &buff[cursor..(cursor + data_buffer_size as usize)];
+        cursor += data_buffer_size as usize;
+        cursor += 2;
+
+        let _c = std::str::from_utf8(&data_buffer).unwrap();
+        commands.push(_c.to_string());
+    }
+    commands[0] = commands[0].to_ascii_uppercase();
+    commands
 }
 
 fn handler(mut stream: TcpStream) {
     let mut buff = [0; 512];
-    let mut cursor = 0;
     while match stream.read(&mut buff) {
         Ok(size) if size > 0 => {
-            let mut commands: Vec<String> = Vec::new();
-            let header_buffer = &buff[cursor..(cursor + 4)];
-            cursor += 4;
-            let header_size = parse_u8(&header_buffer[1]);
-
-            for _i in 0..header_size {
-                let data_buffer_header = &buff[cursor..(cursor +4)];
-                cursor += 4;
-
-                let data_buffer_size: u8 = parse_u8(&data_buffer_header[1]);
-                let data_buffer = &buff[cursor..(cursor + data_buffer_size as usize)];
-                cursor += data_buffer_size as usize;
-                cursor += 2;
-
-                let _c = std::str::from_utf8(&data_buffer).unwrap();
-                commands.push(_c.to_string().to_ascii_uppercase());
-            }
-            cursor = 0;
+            let commands = parser(buff);
             let res = process_commands(commands);
-            stream.write_all(res).expect("Fail");
+            stream.write_all(&res).expect("Fail");
             true
         }
         _ => {
