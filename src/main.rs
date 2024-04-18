@@ -63,7 +63,7 @@ fn ttl_thread() {
     let mut last_run = Instant::now();
     loop {
         let elapsed = last_run.elapsed();
-        if elapsed < Duration::from_millis(10) {
+        if elapsed < Duration::from_millis(1) {
             thread::sleep(Duration::from_millis(10) - elapsed);
         }
         get_memory_instance().remove_expired(get_current_time());
@@ -124,7 +124,16 @@ fn process_commands(commands: Vec<String>) -> Vec<u8> {
             "SET" => {
                 let memory = get_memory_instance();
                 memory.set(commands[1].to_string(), commands[2].to_string());
-                memory.expire(commands[1].to_string(), get_current_time() + 10000);
+
+                if commands.len() > 3 {
+                    match commands[3].to_ascii_uppercase().as_str() {
+                        "PX" => {
+                            let ttl = commands[4].parse::<u128>().unwrap();
+                            memory.expire(commands[1].to_string(), get_current_time() + ttl);
+                        },
+                        _ => {}
+                    }
+                }
                 raw_response = "OK";
             },
             _ => {},
