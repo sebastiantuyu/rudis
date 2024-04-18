@@ -107,8 +107,8 @@ fn read_options() {
         .collect();
     let sz = args.len();
 
-    for argument in &args {
-        let arg = argument.as_str();
+    for (idx, argument) in args.iter().enumerate() {
+        let arg = argument;
         if arg.starts_with("--") {
             let option: Vec<String> = arg.split("--").map(|v| v.to_string()).collect();
             match option[1].as_str() {
@@ -120,15 +120,48 @@ fn read_options() {
                         .options
                         .insert("port".to_string(), args[2].to_string());
                 }
+                "replicaof" => {
+                    if sz <= 3 {
+                        panic!("Missing arguments for [replicaof]");
+                    }
+                    get_options_instance()
+                        .options
+                        .insert(
+                            "role".to_string(),
+                            "slave".to_string()
+                        );
+                    get_options_instance()
+                        .options
+                        .insert(
+                            "master-host".to_string(),
+                            args[idx + 1].to_string()
+                        );
+                    get_options_instance()
+                        .options
+                        .insert(
+                            "master-port".to_string(),
+                            args[idx + 2].to_string()
+                        );
+                }
                 _ => {}
             }
         }
     }
 }
 
+fn handle_replica() {
+    // match TcpStream::connect("127.0.0.1:6379") {
+    //     Ok(stream) => {
+    //         print!("connected to master properly : ) ");
+    //     }
+    //     Err(err) => eprintln!("Failed to connect into master {}", err)
+    // }
+}
+
 fn main() {
     read_options();
     let port = get_options_instance().options.get("port").unwrap();
+    let replica = get_options_instance().options.get("role").unwrap();
 
     let listener = TcpListener::bind(
         format!("127.0.0.1:{}", port)
@@ -138,6 +171,12 @@ fn main() {
     thread::spawn(|| {
         ttl_thread();
     });
+
+    if replica == "replica" {
+        thread::spawn(|| {
+            handle_replica();
+        });
+    }
 
     println!("[Rudis]: Server started on port {}", port);
 
@@ -200,7 +239,8 @@ fn process_commands(commands: Vec<String>) -> Vec<u8> {
             },
             "INFO" => {
                 let options = &get_options_instance().options;
-                return format!("$11\r\nrole:{}\r\n", options.get("role").unwrap()).as_bytes().to_vec();
+                let response = format!("role:{}", options.get("role").unwrap());
+                return format!("${}\r\n{response}\r\n", response.len()).as_bytes().to_vec();
             }
             _ => {},
         }
