@@ -144,6 +144,7 @@ fn read_options() {
                             "master-port".to_string(),
                             args[idx + 2].to_string()
                         );
+                    println!("[Rudis]: Initialize as replica mode");
                 }
                 _ => {}
             }
@@ -152,12 +153,23 @@ fn read_options() {
 }
 
 fn handle_replica() {
-    // match TcpStream::connect("127.0.0.1:6379") {
-    //     Ok(stream) => {
-    //         print!("connected to master properly : ) ");
-    //     }
-    //     Err(err) => eprintln!("Failed to connect into master {}", err)
-    // }
+    match TcpStream::connect("127.0.0.1:6379") {
+        Ok(mut stream) => {
+            println!("[Rudis]: Connected to master properly");
+
+            match stream.write_all("*1\r\n$4\r\nping\r\n".as_bytes()) {
+                Ok(_m) =>  println!("Success sending PING to master"),
+                Err(_err) =>  eprintln!("error while connecting to master"),
+            }
+
+            let mut buffer = String::new();
+            match stream.read_to_string(&mut buffer) {
+                Ok(_) => println!("Received from server: {}", buffer),
+                Err(err) => eprintln!("Error reading from server: {}", err),
+            }
+        },
+        Err(err) => eprintln!("Failed to connect into master {}", err)
+    }
 }
 
 fn main() {
@@ -174,7 +186,7 @@ fn main() {
         ttl_thread();
     });
 
-    if replica == "replica" {
+    if replica == "slave" {
         thread::spawn(|| {
             handle_replica();
         });
