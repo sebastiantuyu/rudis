@@ -62,7 +62,7 @@ pub fn process_commands(commands: Vec<String>) -> Vec<u8> {
             }
             "PSYNC" => {
                 let idl = get_options_instance().get("master_replid").unwrap();
-                return response_parser(format!("FULLRESYNC {}", idl));
+                return response_parser(format!("FULLRESYNC {} 0\r\n", idl));
             }
             _ => {}
         }
