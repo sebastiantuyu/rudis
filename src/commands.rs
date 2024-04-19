@@ -1,11 +1,11 @@
-use crate::{get_current_time, get_memory_instance, get_options_instance, get_replicas_instance};
+use crate::{get_current_time, get_memory_instance, get_options_instance, get_replicas_instance, get_replication_instance};
 
 fn response_parser(res: String) -> Vec<u8> {
     let formatted_response = format!("+{}\r\n", res);
     formatted_response.as_bytes().to_vec()
 }
 
-pub fn process_commands(commands: Vec<String>) -> Vec<u8> {
+pub fn process_commands(commands: Vec<String>) -> Vec<Vec<u8>> {
     let mut raw_response = "";
     if let Some(first_element) = commands.first() {
         match first_element.as_str() {
@@ -20,7 +20,7 @@ pub fn process_commands(commands: Vec<String>) -> Vec<u8> {
                     raw_response = value;
                 }
                 None => {
-                    return b"$-1\r\n".to_vec();
+                    return vec![b"$-1\r\n".to_vec()];
                 }
             },
             "SET" => {
@@ -46,9 +46,9 @@ pub fn process_commands(commands: Vec<String>) -> Vec<u8> {
                 let response = format!(
                     "role:{port}\n\rmaster_replid:{master_replid}\n\rmaster_repl_offset:{master_repl_offset}\n\r"
                 );
-                return format!("${}\r\n{response}\r\n", response.len())
+                return vec![format!("${}\r\n{response}\r\n", response.len())
                     .as_bytes()
-                    .to_vec();
+                    .to_vec()];
             }
             "REPLCONF" => {
                 match commands[1].as_str() {
@@ -62,11 +62,16 @@ pub fn process_commands(commands: Vec<String>) -> Vec<u8> {
             }
             "PSYNC" => {
                 let idl = get_options_instance().get("master_replid").unwrap();
-                return response_parser(format!("FULLRESYNC {} 0\r\n", idl));
+                return vec![
+                    response_parser(format!("FULLRESYNC {} 0", idl)),
+                    get_replication_instance().get_latest_rdb()
+                ];
             }
-            _ => {}
+            _ => {
+                println!("Unrecognized command {:?}", commands);
+            }
         }
     } else {
     }
-    return response_parser(raw_response.to_string());
+    return vec![response_parser(raw_response.to_string())];
 }
