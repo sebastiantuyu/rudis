@@ -9,7 +9,7 @@ use commands::process_commands;
 use memory::MemoryStore;
 use options::Options;
 use parser::parser;
-use replica::handle_replica;
+use replica::{handle_replica, Replicas};
 use std::net::{TcpListener, TcpStream};
 use std::io::Write;
 use std::io::Read;
@@ -22,6 +22,7 @@ use crate::options::read_options;
 
 static mut MEMORY_STORE_INSTANCE: Option<MemoryStore> = None;
 static mut OPTIONS: Option<Options> = None;
+static mut REPLICAS: Option<Replicas> = None;
 
 fn get_current_time() -> u128 {
     let since_epoch = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
@@ -37,6 +38,12 @@ fn get_options_instance() ->  &'static mut Options {
 fn get_memory_instance() -> &'static mut MemoryStore {
     unsafe {
         MEMORY_STORE_INSTANCE.get_or_insert_with(|| MemoryStore::new())
+    }
+}
+
+pub fn get_replicas_instance() -> &'static mut Replicas {
+    unsafe {
+        REPLICAS.get_or_insert_with(|| Replicas::new())
     }
 }
 
@@ -88,7 +95,6 @@ fn handler(mut stream: TcpStream) {
             true
         }
         _ => {
-            println!("Client disconnected");
             false
         }
     } {}

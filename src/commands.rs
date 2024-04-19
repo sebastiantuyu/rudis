@@ -1,4 +1,4 @@
-use crate::{get_current_time, get_memory_instance, get_options_instance};
+use crate::{get_current_time, get_memory_instance, get_options_instance, get_replicas_instance};
 
 fn response_parser(res: String) -> Vec<u8> {
     let formatted_response = format!("+{}\r\n", res);
@@ -53,14 +53,15 @@ pub fn process_commands(commands: Vec<String>) -> Vec<u8> {
             "REPLCONF" => {
                 match commands[1].as_str() {
                     "listening-port" => {
-                        println!("replica-listening: {}", commands[2]);
+                        get_replicas_instance().add_replica(&commands[2]);
                     }
-                    "capa" => {
-                        println!("capa: {}", commands[2]);
-                    }
+                    "capa" => {}
                     _ => {}
                 }
                 raw_response = "OK";
+            }
+            "PSYNC" => {
+                raw_response = "FULLRESYNC <REPL_ID>";
             }
             _ => {}
         }
