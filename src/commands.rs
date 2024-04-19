@@ -61,7 +61,8 @@ pub fn process_commands(commands: Vec<String>) -> Vec<u8> {
                 raw_response = "OK";
             }
             "PSYNC" => {
-                raw_response = "FULLRESYNC <REPL_ID>";
+                let idl = get_options_instance().get("master_replid").unwrap();
+                return response_parser(format!("FULLRESYNC {}", idl));
             }
             _ => {}
         }
