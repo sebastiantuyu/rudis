@@ -38,7 +38,7 @@ async fn send_and_response(stream: &mut TcpStream, data: Vec<&str>) -> Option<St
   let mut buff = [0; 255];
   let size = stream.read(&mut buff).await.unwrap();
   if size > 0 {
-    println!("response: {}", String::from_utf8_lossy(&mut buff).to_string().trim_end());
+    println!("response: {}", String::from_utf8_lossy(&mut buff).to_string().trim());
     println!("end-response");
   }
 

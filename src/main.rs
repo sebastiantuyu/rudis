@@ -163,6 +163,7 @@ async fn main() {
 
                             } else {
                                 println!("debug: slave: {:?}", String::from_utf8_lossy(&replication_buff));
+                                println!("debug: slave: {:?}", &replication_buff);
                             }
                         }
                 }
@@ -193,8 +194,11 @@ impl ReplicaCommand {
 }
 
 async fn process_sync(mut connection: Connection) -> (ReplicaHandle, JoinHandle<()>){
+    {
+        let get_empty_rdb = get_replication_instance().get_latest_rdb();
+        _ = connection.write(get_empty_rdb).await;
+    }
     let (tx, mut rx) = mpsc::channel::<ReplicaCommand>(32);
-
     let handle = tokio::spawn(async move {
         loop {
             while let Some(replica_command) = rx.recv().await {

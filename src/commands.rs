@@ -82,8 +82,7 @@ pub async fn process_commands(commands: Vec<String>, buff: Vec<u8>, stream: &Con
                 *replica_status = true;
 
                 return (vec![
-                    response_parser(format!("FULLRESYNC {} 0", idl)),
-                    get_replication_instance().get_latest_rdb(),
+                    response_parser(format!("FULLRESYNC {} 0", idl))
                 ], false);
             }
             _ => {
