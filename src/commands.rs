@@ -3,14 +3,14 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use crate::{get_current_time, get_memory_instance, get_options_instance, get_replicas_instance, get_replication_instance, Connection, Queue, ReplicasList};
+use crate::{get_current_time, get_memory_instance, get_options_instance, get_replicas_instance, get_replication_instance, Connection, ReplicasList};
 
 fn response_parser(res: String) -> Vec<u8> {
     let formatted_response = format!("+{}\r\n", res);
     formatted_response.as_bytes().to_vec()
 }
 
-pub async fn process_commands(commands: Vec<String>, buff: Vec<u8>, stream: &Connection, replicas_list: &Arc<Mutex<ReplicasList>>, replication_queue: &Arc<Mutex<Queue>>, replica_status: &mut bool) -> (Vec<Vec<u8>>, bool) {
+pub async fn process_commands(commands: Vec<String>, buff: Vec<u8>, stream: &Connection, replicas_list: &Arc<Mutex<ReplicasList>>, replica_status: &mut bool) -> (Vec<Vec<u8>>, bool) {
     let mut raw_response = "";
     if let Some(first_element) = commands.first() {
         match first_element.as_str() {
@@ -46,7 +46,7 @@ pub async fn process_commands(commands: Vec<String>, buff: Vec<u8>, stream: &Con
 
                 println!("# replicas: {}", replicas.handles.lock().await.len());
                 if replicas.handles.lock().await.len() > 0 {
-                    replication_queue.lock().await.tasks.push(buff.to_vec());
+                    // replication_queue.lock().await.tasks.push(buff.to_vec());
                     for replica in replicas.handles.lock().await.iter() {
                         println!("send task to debug");
                         _  = replica.sender.send(crate::ReplicaCommand { message: buff.to_vec() }).await;

@@ -1,27 +1,18 @@
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
-use tokio::net::TcpSocket;
 use tokio::net::TcpStream;
 
 use crate::get_options_instance;
-use crate::get_replicas_instance;
-use crate::get_replication_instance;
-
 
 struct ReplicaInfo {
-  // id: Option<String>,
   port: Option<String>,
-  // capabilities: Option<String>
 }
 
 impl ReplicaInfo {
   fn new() -> Self {
       ReplicaInfo {
-          // id: None,
           port: None,
-          // capabilities: None,
       }
   }
 
@@ -65,7 +56,6 @@ impl Replicas {
     Replicas {
       replicas: HashMap::new(),
       has_setup: false,
-      // replicas_available:  0,
       replicas_conn: Vec::new(),
       replicas_list: Vec::new()
     }
@@ -122,27 +112,6 @@ impl Replicas {
 
 
     listener
-  }
-
-  pub async fn replicate(&mut self, addr: SocketAddr) {
-    println!("address:: {}", addr);
-    match TcpStream::connect(addr).await {
-      Ok(mut replica) => {
-        let mut pending_to_delete: Vec<String> = Vec::new();
-        for (task_port, _task_data) in get_replication_instance().get() {
-          let _ = replica.write_all("*6\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$1\r\n1\r\n$3\r\nSET\r\n$3\r\nbar\r\n$1\r\n2\r\n$3\r\nSET\r\n$3\r\nbaz\r\n$1\r\n3\r\n".as_bytes()).await;
-          pending_to_delete.push(task_port.to_string());
-          println!("Command successfully propagated!");
-
-        }
-        for key in &pending_to_delete {
-          get_replication_instance().remove(key);
-        }
-      }
-      Err(err) => {
-        eprintln!("Error on socket connection {}", err);
-      }
-    }
   }
 }
 

@@ -16,7 +16,7 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::mpsc::{self, Sender};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use std::net::SocketAddr;
@@ -25,7 +25,6 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::vec;
 
 use crate::expiration::ttl;
 use crate::options::read_options;
@@ -66,34 +65,13 @@ pub fn get_replication_instance() -> &'static mut Replication {
     }
 }
 
-struct Queue {
-    tasks: Vec<Vec<u8>>
-}
-
-impl Queue {
-    pub fn new() -> Self {
-        Queue {
-            tasks: Vec::new()
-        }
-    }
-
-    pub fn clear(&mut self) {
-        self.tasks = vec![];
-    }
-}
-
 struct ReplicasList {
     list: Vec<SocketAddr>,
     handles: Mutex<Vec<ReplicaHandle>>
 }
 
-pub struct ReplicaResponse {
-    pub expired: bool,
-}
-
 struct ReplicaHandle {
     pub sender: Sender<ReplicaCommand>,
-    pub receiver: Receiver<ReplicaResponse>,
 }
 
 impl ReplicasList {
@@ -108,9 +86,7 @@ impl ReplicasList {
         println!("Adding new replica {}", addr.to_string());
         self.list.push(addr);
     }
-    // pub fn add_stream(&mut self, stream: &TcpStream) {
-    //     self.stream_list.push(stream.clone());
-    // }
+
 }
 
 struct Connection {
@@ -155,11 +131,10 @@ async fn main() {
             if elapsed < Duration::from_millis(1) {
                 thread::sleep(Duration::from_millis(1) - elapsed);
             }
-
+            last_run = Instant::now();
             ttl();
         }
     });
-    let queue: Arc<Mutex<Queue>> = Arc::new(Mutex::new(Queue::new()));
     let replicas: Arc<Mutex<ReplicasList>> = Arc::new(Mutex::new(ReplicasList::new()));
     let port = get_options_instance().get("port").unwrap();
 
@@ -197,11 +172,10 @@ async fn main() {
     loop {
         let (stream, _) = listener.accept().await.unwrap();
         let replicas_list = replicas.clone();
-        let replication_queue = queue.clone();
         let connection = Connection::bind(stream);
 
         tokio::spawn(async move {
-            let _ = handle(connection, replication_queue, replicas_list).await;
+            let _ = handle(connection, replicas_list).await;
         });
     }
 }
@@ -218,7 +192,6 @@ impl ReplicaCommand {
 
 async fn process_sync(mut connection: Connection) -> (ReplicaHandle, JoinHandle<()>){
     let (tx, mut rx) = mpsc::channel::<ReplicaCommand>(32);
-    let (_, rx_r) = mpsc::channel::<ReplicaResponse>(32);
 
     let handle = tokio::spawn(async move {
         loop {
@@ -229,7 +202,6 @@ async fn process_sync(mut connection: Connection) -> (ReplicaHandle, JoinHandle<
     });
     (
         ReplicaHandle {
-            receiver: rx_r,
             sender: tx
         },
         handle
@@ -239,7 +211,6 @@ async fn process_sync(mut connection: Connection) -> (ReplicaHandle, JoinHandle<
 
 async fn handle(
     mut connection: Connection,
-    queue: Arc<Mutex<Queue>>,
     replicas: Arc<Mutex<ReplicasList>>
 ) {
     let mut is_replica = false;
@@ -260,7 +231,6 @@ async fn handle(
                     buff[..size].to_vec(),
                     &connection,
                     &replicas,
-                    &queue,
                     &mut is_replica
                 ).await;
                 for response in &responses {
