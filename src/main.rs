@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 mod replica;
 mod expiration;
 mod parser;
@@ -11,15 +12,23 @@ use memory::MemoryStore;
 use options::Options;
 use parser::parser;
 use replica::Replicas;
-use std::net::{TcpListener, TcpStream};
-use std::io::Write;
-use std::io::Read;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpListener;
+use tokio::net::TcpStream;
+use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+use std::time::Instant;
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::vec;
 
 use crate::expiration::ttl;
 use crate::options::read_options;
-use crate::replica::sync_to_master;
 use crate::replication::Replication;
 
 
@@ -57,12 +66,87 @@ pub fn get_replication_instance() -> &'static mut Replication {
     }
 }
 
-fn main() {
+struct Queue {
+    tasks: Vec<Vec<u8>>
+}
+
+impl Queue {
+    pub fn new() -> Self {
+        Queue {
+            tasks: Vec::new()
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.tasks = vec![];
+    }
+}
+
+struct ReplicasList {
+    list: Vec<SocketAddr>,
+    handles: Mutex<Vec<ReplicaHandle>>
+}
+
+pub struct ReplicaResponse {
+    pub expired: bool,
+}
+
+struct ReplicaHandle {
+    pub sender: Sender<ReplicaCommand>,
+    pub receiver: Receiver<ReplicaResponse>,
+}
+
+impl ReplicasList {
+    pub fn new() -> Self {
+        ReplicasList {
+            list: Vec::new(),
+            handles: Mutex::new(Vec::new())
+        }
+    }
+
+    pub fn add(&mut self, addr: SocketAddr) {
+        println!("Adding new replica {}", addr.to_string());
+        self.list.push(addr);
+    }
+    // pub fn add_stream(&mut self, stream: &TcpStream) {
+    //     self.stream_list.push(stream.clone());
+    // }
+}
+
+struct Connection {
+    pub stream: TcpStream
+}
+
+impl Connection {
+    pub fn bind(stream: TcpStream) -> Self {
+        Self {
+            stream
+        }
+    }
+
+    pub async fn write(&mut self, data: Vec<u8>) -> Result<(), std::io::Error> {
+        _ = self.stream.write_all(&data).await;
+        self.stream.flush().await
+    }
+
+    pub async fn read(&mut self) -> (usize, [u8; 255]){
+        let mut buff = [0;255];
+        (self.stream.read(&mut buff).await.unwrap(), buff)
+    }
+}
+
+fn find_last_zero(buff: [u8; 255]) -> i32 {
+    let mut index = 0;
+    for buf_idx in buff {
+        if buf_idx == 0 { break; }
+        index += 1;
+    }
+    index
+}
+
+#[tokio::main]
+async fn main() {
     read_options();
-    let port = get_options_instance().get("port").unwrap();
-    let listener = TcpListener::bind(
-        format!("0.0.0.0:{}", port)
-    ).unwrap();
 
     thread::spawn(|| {
         let mut last_run = Instant::now();
@@ -73,51 +157,119 @@ fn main() {
             }
 
             ttl();
-            match  get_options_instance().get("role").unwrap().as_str() {
-                "slave" => {
-                    if !get_replicas_instance().status() { sync_to_master(); }
-                }
-                _ => {}
-            }
-            last_run = Instant::now();
         }
     });
+    let queue: Arc<Mutex<Queue>> = Arc::new(Mutex::new(Queue::new()));
+    let replicas: Arc<Mutex<ReplicasList>> = Arc::new(Mutex::new(ReplicasList::new()));
+    let port = get_options_instance().get("port").unwrap();
+
+    let listener = TcpListener::bind(
+        format!("0.0.0.0:{}", port)
+    ).await.unwrap();
 
     println!("[Rudis]: Server started on port {}", port);
-    for listener_stream in listener.incoming() {
-        match listener_stream {
-            Ok(stream) => {
-                thread::spawn(|| {
-                    handler(stream);
-                });
-            }
-            Err(e) => {
-                println!("Error on connection {}", e);
-            }
+
+    match  get_options_instance().get("role").unwrap().as_str() {
+        "slave" => {
+            tokio::spawn(async move {
+                let mut connection = get_replicas_instance().sync_to_master().await;
+                loop {
+                    let mut replication_buff = [0; 255];
+                    connection.read(&mut replication_buff).await.unwrap();
+                    let last_zero = find_last_zero(replication_buff) as usize;
+                        if last_zero > 0  {
+                            if &replication_buff[(last_zero - 2)..last_zero] == [13, 10] {
+                                let commands = parser(replication_buff);
+                                println!("{:?}", commands);
+                                if commands[0] == "SET" {
+                                    let memory = get_memory_instance();
+                                    memory.set(commands[1].to_string(), commands[2].to_string());
+                                }
+
+                            } else {}
+                        }
+                }
+            });
         }
+        _ => {}
+    }
+
+    loop {
+        let (stream, _) = listener.accept().await.unwrap();
+        let replicas_list = replicas.clone();
+        let replication_queue = queue.clone();
+        let connection = Connection::bind(stream);
+
+        tokio::spawn(async move {
+            let _ = handle(connection, replication_queue, replicas_list).await;
+        });
     }
 }
 
+pub struct ReplicaCommand {
+    pub message: Vec<u8>,
+}
 
-fn handler(mut stream: TcpStream) {
-    let mut buff = [0; 255];
-    println!("New connection: {}", stream.peer_addr().unwrap());
+impl ReplicaCommand {
+    pub fn new(message: Vec<u8>) -> Self {
+        Self { message }
+    }
+}
+
+async fn process_sync(mut connection: Connection) -> (ReplicaHandle, JoinHandle<()>){
+    let (tx, mut rx) = mpsc::channel::<ReplicaCommand>(32);
+    let (_, rx_r) = mpsc::channel::<ReplicaResponse>(32);
+
+    let handle = tokio::spawn(async move {
+        loop {
+            while let Some(replica_command) = rx.recv().await {
+                _ = connection.write(replica_command.message).await;
+            }
+        }
+    });
+    (
+        ReplicaHandle {
+            receiver: rx_r,
+            sender: tx
+        },
+        handle
+    )
+}
+
+
+async fn handle(
+    mut connection: Connection,
+    queue: Arc<Mutex<Queue>>,
+    replicas: Arc<Mutex<ReplicasList>>
+) {
+    let mut is_replica = false;
 
     loop {
-        match stream.read(&mut buff) {
-            Ok(size) if size > 0 => {
-                if &buff[(size - 2)..size] == [13, 10] {
-                    let commands = parser(buff);
-                    let responses = process_commands(commands);
-                    for response in &responses {
-                        stream.write(response).expect("Fail");
-                    }
-                } else {
-                    println!("[Rudis]: Syncing data");
-                    stream.write(&"+OK\r\n".as_bytes()).expect("failed");
+        if is_replica {
+            let (replica_handle, handle) = process_sync(connection).await;
+            replicas.lock().await.handles.lock().await.push(replica_handle);
+            _ = handle.await;
+            return;
+        }
+        let (size, buff) = connection.read().await;
+        if size > 0 {
+            if &buff[(size - 2)..size] == [13, 10] {
+                let commands = parser(buff);
+                let (responses, _) = process_commands(
+                    commands,
+                    buff[..size].to_vec(),
+                    &connection,
+                    &replicas,
+                    &queue,
+                    &mut is_replica
+                ).await;
+                for response in &responses {
+                    _ = connection.write(response.to_vec()).await;
                 }
+            } else {
+                println!("[Rudis]: Syncing data");
+                println!("[Rudis][debug]: {}", String::from_utf8_lossy(&buff[..size]));
             }
-            _ => {}
         }
     }
 }

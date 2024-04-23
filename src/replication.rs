@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::{Read, Write}, net::TcpStream};
+use std::collections::HashMap;
 pub struct Replication {
   pending: HashMap<String, Vec<u8>>
 }
@@ -31,27 +31,7 @@ impl Replication {
     &self.pending
   }
 
-  pub fn replicate(&mut self) {
-    let mut pending_to_delete: Vec<String> = Vec::new();
-    for (task_port, task_data) in &self.pending {
-      println!("[Rudis][master]: Attempt to replicate to {task_port}");
-      match TcpStream::connect(format!("localhost:{task_port}")) {
-        Ok(mut stream) => {
-          println!("[Rudis][master]: Replicating to {task_port}");
-          stream.write_all(task_data).expect("failed to send data");
-
-          let mut buff = [0; 128];
-          let bytes_read = stream.read(&mut buff).expect("failed response");
-          println!("Server response {}", String::from_utf8_lossy(&buff[..bytes_read]));
-          pending_to_delete.push(task_port.to_string());
-        }
-        Err(err) => {
-          eprintln!("error connecting to master {}", err);
-        },
-      }
-    }
-    for key in &pending_to_delete {
-      self.pending.remove(key);
-    }
+  pub fn remove(&mut self, key: &str) {
+    self.pending.remove(key);
   }
 }

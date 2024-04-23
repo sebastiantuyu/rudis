@@ -1,11 +1,13 @@
 use std::collections::HashMap;
-// use std::collections::HashMap;
-use std::net::TcpStream;
-use std::io::Write;
-use std::io::Read;
+use std::net::SocketAddr;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpSocket;
+use tokio::net::TcpStream;
 
 use crate::get_options_instance;
 use crate::get_replicas_instance;
+use crate::get_replication_instance;
 
 
 struct ReplicaInfo {
@@ -28,10 +30,34 @@ impl ReplicaInfo {
   }
 }
 
+
+fn parse_str_to_repl(data: Vec<&str>) -> Vec<u8> {
+  let mut repl = format!("*{}\r\n", data.len());
+  for d in data {
+    repl +=  &format!("${}\r\n{}\r\n", d.len(), d);
+  }
+  repl.as_bytes().to_owned()
+}
+
+async fn send_and_response(stream: &mut TcpStream, data: Vec<&str>) -> Option<String> {
+  println!("{:?}", data);
+  let _ = stream.write_all(&parse_str_to_repl(data)).await;
+  _ = stream.flush().await;
+
+  let mut buff = [0; 255];
+  let size = stream.read(&mut buff).await.unwrap();
+  if size > 0 {
+    println!("response: {}", String::from_utf8_lossy(&mut buff).to_string());
+  }
+
+  None
+}
+
 pub struct Replicas {
   replicas: HashMap<String, ReplicaInfo>,
   has_setup: bool,
-  replicas_conn: Vec<String>
+  replicas_conn: Vec<String>,
+  replicas_list: Vec<TcpStream>
 }
 
 impl Replicas {
@@ -40,7 +66,8 @@ impl Replicas {
       replicas: HashMap::new(),
       has_setup: false,
       // replicas_available:  0,
-      replicas_conn: Vec::new()
+      replicas_conn: Vec::new(),
+      replicas_list: Vec::new()
     }
   }
 
@@ -67,47 +94,57 @@ impl Replicas {
   pub fn latest(&mut self) -> Option<&String> {
     self.replicas_conn.last()
   }
-}
 
-
-
-
-fn parse_str_to_repl(data: Vec<&str>) -> Vec<u8> {
-  let mut repl = format!("*{}\r\n", data.len());
-  for d in data {
-    repl +=  &format!("${}\r\n{}\r\n", d.len(), d);
+  pub fn add_replica_stream(&mut self, stream: TcpStream) {
+    self.replicas_list.push(stream);
+    println!("{}", self.replicas_list.len());
   }
-  repl.as_bytes().to_owned()
-}
 
-fn send_and_response(stream: &mut TcpStream, data: Vec<&str>) {
-  match stream.write_all(&parse_str_to_repl(data)) {
-      Ok(_m) =>  println!("Success sending to master"),
-      Err(_err) =>  eprintln!("error while connecting to master"),
+  pub async fn sync_to_master(&mut self) -> TcpStream {
+    println!("[Redis][replica]: Attempting syncing with master");
+    let master_port = get_options_instance().get("master-port").unwrap();
+    let port = get_options_instance().get("port").unwrap();
+
+    let mut listener = TcpStream::connect(format!("0.0.0.0:{}", master_port)).await.expect("failed");
+
+    {
+      _ = send_and_response(&mut listener, vec! ["PING"]).await;
+    }
+    {
+      _ = send_and_response(&mut listener, vec! ["REPLCONF", "listening-port", port]).await;
+    }
+    {
+      _ = send_and_response(&mut listener, vec! ["REPLCONF", "capa", "psync2"]).await;
+    }
+    {
+      _ = send_and_response(&mut listener, vec! ["PSYNC", "?", "-1"]).await;
+    }
+
+
+    listener
   }
-  let mut buffer = [0; 128];
-  let bytes_read = stream.read(&mut buffer).expect("failed reading buffer");
-  let response = String::from_utf8_lossy(&buffer[..bytes_read]);
-  println!("Server response: {}", response);
-}
 
-pub fn sync_to_master() {
-  println!("[Redis][replica]: Attempting syncing with master");
-  let master_port = get_options_instance().get("master-port").unwrap();
-  let port = get_options_instance().get("port").unwrap();
+  pub async fn replicate(&mut self, addr: SocketAddr) {
+    println!("address:: {}", addr);
+    match TcpStream::connect(addr).await {
+      Ok(mut replica) => {
+        let mut pending_to_delete: Vec<String> = Vec::new();
+        for (task_port, _task_data) in get_replication_instance().get() {
+          let _ = replica.write_all("*6\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$1\r\n1\r\n$3\r\nSET\r\n$3\r\nbar\r\n$1\r\n2\r\n$3\r\nSET\r\n$3\r\nbaz\r\n$1\r\n3\r\n".as_bytes()).await;
+          pending_to_delete.push(task_port.to_string());
+          println!("Command successfully propagated!");
 
-  match TcpStream::connect(format!("0.0.0.0:{}", master_port)) {
-      Ok(mut stream) => {
-          println!("[Rudis]: Connected to master properly on: {}", master_port);
-          //
-          // Routine for handshake connection between replica an master
-          //
-          send_and_response(&mut stream, vec! ["PING"]);
-          send_and_response(&mut stream, vec! ["REPLCONF", "listening-port", port]);
-          send_and_response(&mut stream, vec! ["REPLCONF", "capa", "psync2"]);
-          send_and_response(&mut stream, vec! ["PSYNC", "?", "-1"]);
-          get_replicas_instance().set_status(true);
-      },
-      Err(err) => eprintln!("Failed to connect into master {}", err)
+        }
+        for key in &pending_to_delete {
+          get_replication_instance().remove(key);
+        }
+      }
+      Err(err) => {
+        eprintln!("Error on socket connection {}", err);
+      }
+    }
   }
 }
+
+
+
