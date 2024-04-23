@@ -109,8 +109,6 @@ impl Replicas {
     {
       _ = send_and_response(&mut listener, vec! ["PSYNC", "?", "-1"]).await;
     }
-
-
     listener
   }
 }

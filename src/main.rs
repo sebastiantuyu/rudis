@@ -161,7 +161,9 @@ async fn main() {
                                     memory.set(commands[1].to_string(), commands[2].to_string());
                                 }
 
-                            } else {}
+                            } else {
+                                println!("debug: slave: {:?}", String::from_utf8_lossy(&replication_buff));
+                            }
                         }
                 }
             });
