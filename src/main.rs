@@ -156,9 +156,17 @@ async fn main() {
                     let commands = parser_v2(replication_buff);
                     println!("commands to exec: {:?}", commands);
                     for cmd in commands {
-                        if cmd[0] == "SET" {
-                            let memory = get_memory_instance();
-                            memory.set(cmd[1].to_string(), cmd[2].to_string());
+                        match cmd[0].as_str() {
+                            "SET" => {
+                                let memory = get_memory_instance();
+                                memory.set(cmd[1].to_string(), cmd[2].to_string());
+                            }
+                            "REPLCONF" => {
+                                if cmd[1] == "GETACK" {
+                                    _ = connection.write(b"REPLCONF ACK 0").await;
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
