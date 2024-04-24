@@ -112,14 +112,14 @@ impl Connection {
     }
 }
 
-fn find_last_zero(buff: [u8; 255]) -> i32 {
-    let mut index = 0;
-    for buf_idx in buff {
-        if buf_idx == 0 { break; }
-        index += 1;
-    }
-    index
-}
+// fn find_last_zero(buff: [u8; 255]) -> i32 {
+//     let mut index = 0;
+//     for buf_idx in buff {
+//         if buf_idx == 0 { break; }
+//         index += 1;
+//     }
+//     index
+// }
 
 #[tokio::main]
 async fn main() {
@@ -154,25 +154,13 @@ async fn main() {
                     connection.read(&mut replication_buff).await.unwrap();
 
                     let commands = parser_v2(replication_buff);
+                    println!("commands to exec: {:?}", commands);
                     for cmd in commands {
-                        dbg!(&cmd);
                         if cmd[0] == "SET" {
                             let memory = get_memory_instance();
                             memory.set(cmd[1].to_string(), cmd[2].to_string());
                         }
                     }
-                    // let last_zero = find_last_zero(replication_buff) as usize;
-
-                    // if last_zero > 0  {
-                    //     if &replication_buff[(last_zero - 2)..last_zero] == [13, 10] {
-                    //         let commands = parser(replication_buff);
-                    //         println!("{:?}", commands);
-                    //         if commands[0] == "SET" {
-                    //             let memory = get_memory_instance();
-                    //             memory.set(commands[1].to_string(), commands[2].to_string());
-                    //         }
-                    //     }
-                    // }
                 }
             });
         }
@@ -221,7 +209,6 @@ async fn process_sync(mut connection: Connection) -> (ReplicaHandle, JoinHandle<
     )
 }
 
-
 async fn handle(
     mut connection: Connection,
     replicas: Arc<Mutex<ReplicasList>>
@@ -236,23 +223,17 @@ async fn handle(
             return;
         }
         let (size, buff) = connection.read().await;
-        if size > 0 {
-            println!("{} {}", buff[0], String::from_utf8_lossy(&[buff[0]]));
-            if &buff[(size - 2)..size] == [13, 10] {
-                let commands = parser(buff);
-                let (responses, _) = process_commands(
-                    commands,
-                    buff[..size].to_vec(),
-                    &connection,
-                    &replicas,
-                    &mut is_replica
-                ).await;
-                for response in &responses {
-                    _ = connection.write(response.to_vec()).await;
-                }
-            } else {
-                println!("[Rudis]: Syncing data");
-                println!("[Rudis][debug]: {}", String::from_utf8_lossy(&buff[..size]));
+        let commands = parser_v2(buff);
+        for cmd in commands {
+            let (responses, _) = process_commands(
+                cmd,
+                buff[..size].to_vec(),
+                &connection,
+                &replicas,
+                &mut is_replica
+            ).await;
+            for response in &responses {
+                _ = connection.write(response.to_vec()).await;
             }
         }
     }

@@ -90,9 +90,13 @@ pub fn parser_v2(bytes: [u8; 255]) -> Vec<Vec<String>> {
       }
   }
 
+  if start_index < bytes.len() {
+    let sub_vector = bytes[start_index..].to_vec();
+    sections.push(sub_vector);
+  }
 
   for section in &sections {
-    if section.len() <= 50 {
+    if section.len() <= 60 {
       section_commands.push(parser_v3(section));
     }
   }

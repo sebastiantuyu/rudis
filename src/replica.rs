@@ -3,7 +3,9 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 
+use crate::get_memory_instance;
 use crate::get_options_instance;
+use crate::parser::parser_v2;
 
 struct ReplicaInfo {
   port: Option<String>,
@@ -36,13 +38,16 @@ async fn send_and_response(stream: &mut TcpStream, data: Vec<&str>) -> Option<St
 
   let mut buff = [0; 255];
   let size = stream.read(&mut buff).await.unwrap();
-  if size > 0 {
-    println!("{}", String::from_utf8_lossy(&buff));
-    // dbg!(&buff[..size]);
-    // dbg!("response: {}", String::from_utf8_lossy(&mut buff[..size]).to_string().trim());
-    // dbg!("end: {}", buff[size]);
-    // dbg!("end: {}", buff[size + 1]);
-    // dbg!("end-response");
+  if size > 100 {
+    // dbg!("str_size: {} size: {}", String::from_utf8_lossy(&buff).len(), size);
+    let commands = parser_v2(buff);
+    println!("commands to exec: {:?}", commands);
+    for cmd in commands {
+        if cmd[0] == "SET" {
+            let memory = get_memory_instance();
+            memory.set(cmd[1].to_string(), cmd[2].to_string());
+        }
+    }
   }
 
   None
