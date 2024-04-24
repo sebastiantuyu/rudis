@@ -31,15 +31,18 @@ fn parse_str_to_repl(data: Vec<&str>) -> Vec<u8> {
 }
 
 async fn send_and_response(stream: &mut TcpStream, data: Vec<&str>) -> Option<String> {
-  println!("{:?}", data);
   let _ = stream.write_all(&parse_str_to_repl(data)).await;
   _ = stream.flush().await;
 
   let mut buff = [0; 255];
   let size = stream.read(&mut buff).await.unwrap();
   if size > 0 {
-    println!("response: {}", String::from_utf8_lossy(&mut buff).to_string().trim());
-    println!("end-response");
+    println!("{}", String::from_utf8_lossy(&buff));
+    // dbg!(&buff[..size]);
+    // dbg!("response: {}", String::from_utf8_lossy(&mut buff[..size]).to_string().trim());
+    // dbg!("end: {}", buff[size]);
+    // dbg!("end: {}", buff[size + 1]);
+    // dbg!("end-response");
   }
 
   None

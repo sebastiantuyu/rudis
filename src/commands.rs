@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-use crate::{get_current_time, get_memory_instance, get_options_instance, get_replicas_instance, get_replication_instance, Connection, ReplicasList};
+use crate::{get_current_time, get_memory_instance, get_options_instance, get_replicas_instance, Connection, ReplicasList};
 
 fn response_parser(res: String) -> Vec<u8> {
     let formatted_response = format!("+{}\r\n", res);

@@ -35,6 +35,7 @@ static mut MEMORY_STORE_INSTANCE: Option<MemoryStore> = None;
 static mut OPTIONS: Option<Options> = None;
 static mut REPLICAS: Option<Replicas> = None;
 static mut REPLICATION: Option<Replication> = None;
+use crate::parser::parser_v2;
 
 fn get_current_time() -> u128 {
     let since_epoch = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
@@ -151,21 +152,27 @@ async fn main() {
                 loop {
                     let mut replication_buff = [0; 255];
                     connection.read(&mut replication_buff).await.unwrap();
-                    let last_zero = find_last_zero(replication_buff) as usize;
-                        if last_zero > 0  {
-                            if &replication_buff[(last_zero - 2)..last_zero] == [13, 10] {
-                                let commands = parser(replication_buff);
-                                println!("{:?}", commands);
-                                if commands[0] == "SET" {
-                                    let memory = get_memory_instance();
-                                    memory.set(commands[1].to_string(), commands[2].to_string());
-                                }
 
-                            } else {
-                                println!("debug: slave: {:?}", String::from_utf8_lossy(&replication_buff));
-                                println!("debug: slave: {:?}", &replication_buff);
-                            }
+                    let commands = parser_v2(replication_buff);
+                    for cmd in commands {
+                        dbg!(&cmd);
+                        if cmd[0] == "SET" {
+                            let memory = get_memory_instance();
+                            memory.set(cmd[1].to_string(), cmd[2].to_string());
                         }
+                    }
+                    // let last_zero = find_last_zero(replication_buff) as usize;
+
+                    // if last_zero > 0  {
+                    //     if &replication_buff[(last_zero - 2)..last_zero] == [13, 10] {
+                    //         let commands = parser(replication_buff);
+                    //         println!("{:?}", commands);
+                    //         if commands[0] == "SET" {
+                    //             let memory = get_memory_instance();
+                    //             memory.set(commands[1].to_string(), commands[2].to_string());
+                    //         }
+                    //     }
+                    // }
                 }
             });
         }
@@ -230,6 +237,7 @@ async fn handle(
         }
         let (size, buff) = connection.read().await;
         if size > 0 {
+            println!("{} {}", buff[0], String::from_utf8_lossy(&[buff[0]]));
             if &buff[(size - 2)..size] == [13, 10] {
                 let commands = parser(buff);
                 let (responses, _) = process_commands(
